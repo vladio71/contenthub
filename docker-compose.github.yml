@@ -1,0 +1,12 @@
+# Use real GitHub instead of the mock provider:
+#   docker compose -f docker-compose.yml -f docker-compose.github.yml up --build
+# Put GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET in .env.
+# In your GitHub OAuth app, set the callback URL to http://localhost:8081/api/auth/github/callback
+services:
+  auth-service:
+    environment:
+      GITHUB_CLIENT_ID: ${GITHUB_CLIENT_ID:?Set GITHUB_CLIENT_ID in .env}
+      GITHUB_CLIENT_SECRET: ${GITHUB_CLIENT_SECRET:?Set GITHUB_CLIENT_SECRET in .env}
+      GITHUB_AUTHORIZE_URL: https://github.com/login/oauth/authorize
+      GITHUB_TOKEN_URL: https://github.com/login/oauth/access_token
+      GITHUB_API_URL: https://api.github.com

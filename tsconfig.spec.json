@@ -1,0 +1,14 @@
+{
+  "extends": "./tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "declaration": false,
+    "types": ["node", "jest"],
+    "rootDir": ".",
+    "paths": {
+      "@contenthub/common": ["./libs/common/src/index.ts"],
+      "@contenthub/mock-oauth": ["./tools/mock-oauth/src/app.ts"]
+    }
+  },
+  "include": ["libs/*/src", "apps/*/src", "tools/*/src", "test", "scripts"]
+}

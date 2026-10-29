@@ -1,0 +1,14 @@
+{
+  "name": "@contenthub/mock-oauth",
+  "version": "1.0.0",
+  "private": true,
+  "main": "dist/main.js",
+  "types": "dist/main.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json"
+  },
+  "dependencies": {
+    "express": "5.2.1",
+    "@types/express": "5.0.6"
+  }
+}

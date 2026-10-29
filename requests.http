@@ -1,0 +1,229 @@
+# VS Code REST Client (extension: humao.rest-client)
+# Start the stack first:  docker compose up --build
+# Run the requests from top to bottom. Each one saves what the next one needs.
+
+@gateway = http://localhost:8081
+@auth = {{gateway}}/api/auth
+@profiles = {{gateway}}/api/profiles
+@catalog = {{gateway}}/api/catalog
+
+### ---------------------------------------------------------------- health
+GET {{auth}}/health
+
+###
+GET {{profiles}}/health
+
+###
+GET {{catalog}}/health
+
+### ---------------------------------------------------------------- login as alice
+# Step 1: the service answers 302 to the mock provider and sets the state cookie.
+# @name startAlice
+# @no-redirect
+GET {{auth}}/github/login
+
+### Step 2: open the provider URL. The mock approves at once and redirects to /github/callback.
+# The mock logs in as alice unless you add &login=bob or &login=carol.
+# @name loginAlice
+GET {{startAlice.response.headers.Location}}
+
+###
+@aliceToken = {{loginAlice.response.body.accessToken}}
+@aliceRefresh = {{loginAlice.response.body.refreshToken}}
+@aliceId = {{loginAlice.response.body.user.id}}
+
+### ---------------------------------------------------------------- login as bob
+# @name startBob
+# @no-redirect
+GET {{auth}}/github/login
+
+###
+# @name loginBob
+GET {{startBob.response.headers.Location}}&login=bob
+
+###
+@bobToken = {{loginBob.response.body.accessToken}}
+
+### ---------------------------------------------------------------- auth-service
+GET {{auth}}/me
+Authorization: Bearer {{aliceToken}}
+
+###
+GET {{auth}}/sessions
+Authorization: Bearer {{aliceToken}}
+
+###
+GET {{auth}}/providers
+
+### Rotate the refresh token. Run it twice with the same body to see reuse detection (401).
+POST {{auth}}/refresh
+Content-Type: application/json
+
+{ "refreshToken": "{{aliceRefresh}}" }
+
+###
+POST {{auth}}/logout
+Content-Type: application/json
+
+{ "refreshToken": "{{aliceRefresh}}" }
+
+###
+# Use a session id from GET /sessions
+DELETE {{auth}}/sessions/PUT_A_SESSION_ID_HERE
+Authorization: Bearer {{aliceToken}}
+
+### ---------------------------------------------------------------- profile-service
+# The first call creates the profile from the token.
+GET {{profiles}}/me
+Authorization: Bearer {{aliceToken}}
+
+###
+PUT {{profiles}}/me
+Authorization: Bearer {{aliceToken}}
+Content-Type: application/json
+
+{
+  "displayName": "Alice Moroz",
+  "bio": "Backend engineer who loves MongoDB",
+  "location": "Mykolaiv, Ukraine",
+  "links": [{ "label": "GitHub", "url": "https://github.com/alice" }]
+}
+
+###
+PATCH {{profiles}}/me/preferences
+Authorization: Bearer {{aliceToken}}
+Content-Type: application/json
+
+{ "theme": "dark", "language": "uk-UA", "publicProfile": true }
+
+### Upload an avatar: change the path to a real PNG, JPEG or WebP file (max 2 MB).
+POST {{profiles}}/me/avatar
+Authorization: Bearer {{aliceToken}}
+Content-Type: multipart/form-data; boundary=ContentHubBoundary
+
+--ContentHubBoundary
+Content-Disposition: form-data; name="avatar"; filename="avatar.png"
+Content-Type: image/png
+
+< ./avatar.png
+--ContentHubBoundary--
+
+###
+DELETE {{profiles}}/me/avatar
+Authorization: Bearer {{aliceToken}}
+
+###
+GET {{profiles}}/alice
+
+###
+GET {{profiles}}?q=mongodb&page=1&pageSize=10
+
+### ---------------------------------------------------------------- catalog-service: items
+# @name createItem
+POST {{catalog}}/items
+Authorization: Bearer {{aliceToken}}
+Content-Type: application/json
+
+{
+  "title": "Why keyset pagination beats skip",
+  "body": "Skip walks over every row it skips. A cursor jumps straight to the next row.",
+  "tags": ["mongodb", "pagination"]
+}
+
+###
+@itemId = {{createItem.response.body.id}}
+@itemSlug = {{createItem.response.body.slug}}
+
+###
+POST {{catalog}}/items/{{itemId}}/publish
+Authorization: Bearer {{aliceToken}}
+
+### Reading by slug adds a view.
+GET {{catalog}}/items/{{itemSlug}}
+Authorization: Bearer {{bobToken}}
+
+###
+PATCH {{catalog}}/items/{{itemId}}
+Authorization: Bearer {{aliceToken}}
+Content-Type: application/json
+
+{ "body": "Edited text", "tags": ["mongodb", "pagination", "performance"] }
+
+### Only the author can do this: bob gets 403.
+PATCH {{catalog}}/items/{{itemId}}
+Authorization: Bearer {{bobToken}}
+Content-Type: application/json
+
+{ "title": "Not allowed" }
+
+### ---------------------------------------------------------------- catalog-service: likes (transaction)
+POST {{catalog}}/items/{{itemId}}/like
+Authorization: Bearer {{bobToken}}
+
+### Run it again: 409, and the counter does not change.
+POST {{catalog}}/items/{{itemId}}/like
+Authorization: Bearer {{bobToken}}
+
+###
+DELETE {{catalog}}/items/{{itemId}}/like
+Authorization: Bearer {{bobToken}}
+
+### ---------------------------------------------------------------- catalog-service: lists
+# Offset pagination (default)
+GET {{catalog}}/items?page=1&pageSize=10&sort=createdAt&order=desc
+Authorization: Bearer {{aliceToken}}
+
+### Filters: text search, tags (any or all), author, status, date range
+GET {{catalog}}/items?q=mongodb&tags=mongodb,pagination&tagMode=all&dateFrom=2020-01-01T00:00:00Z&sort=likes&order=desc
+Authorization: Bearer {{aliceToken}}
+
+### Keyset pagination: first page. Send "cursor=" (empty) to select cursor mode.
+# @name firstPage
+GET {{catalog}}/items?pageSize=5&sort=createdAt&order=desc&cursor=
+Authorization: Bearer {{aliceToken}}
+
+### Next page: copy nextCursor from the answer above.
+GET {{catalog}}/items?pageSize=5&sort=createdAt&order=desc&cursor={{firstPage.response.body.nextCursor}}
+Authorization: Bearer {{aliceToken}}
+
+### My drafts
+GET {{catalog}}/items?status=draft
+Authorization: Bearer {{aliceToken}}
+
+### ---------------------------------------------------------------- catalog-service: aggregations
+GET {{catalog}}/stats/tags?limit=10
+Authorization: Bearer {{aliceToken}}
+
+###
+GET {{catalog}}/stats/authors?limit=5
+Authorization: Bearer {{aliceToken}}
+
+### ---------------------------------------------------------------- catalog-service: collections
+# @name createCollection
+POST {{catalog}}/collections
+Authorization: Bearer {{aliceToken}}
+Content-Type: application/json
+
+{ "name": "Reading list" }
+
+###
+@collectionId = {{createCollection.response.body.id}}
+
+### Add up to 50 items in one transaction. Repeated ids are ignored.
+POST {{catalog}}/collections/{{collectionId}}/items
+Authorization: Bearer {{aliceToken}}
+Content-Type: application/json
+
+{ "itemIds": ["{{itemId}}"] }
+
+###
+GET {{catalog}}/collections/{{collectionId}}
+Authorization: Bearer {{aliceToken}}
+
+###
+GET {{catalog}}/collections
+Authorization: Bearer {{aliceToken}}
+
+###
+DELETE {{catalog}}/items/{{itemId}}
+Authorization: Bearer {{aliceToken}}
